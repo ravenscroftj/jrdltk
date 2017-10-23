@@ -16,7 +16,7 @@ class VocabularyManager:
         self._index = {}
         self.include_unk = include_unk
         self.nlp = spacy.load(lang)
-        self.custom_vectors = custom_vectors
+        self.custom_vectors_file = custom_vectors_file
         self.logger = logging.getLogger(self.__class__.__qualname__)
 
 
@@ -30,21 +30,37 @@ class VocabularyManager:
 
         # iterate over documents and identify all unique words
         dictionary = set()
+        lens = []
         for doc in self.nlp.pipe(samples):
-            dictionary.add([word.text for word in doc])
+            # keeping track of length of document
+            lens.append(len(doc))
+            # add all words from doc to our dictionary (if not there already)
+            dictionary.update([word.text for word in doc])
+
+
+        #work out the max length of the sentences
+        self.max_training_len = max(lens)
+
+        # convert dictionary into list for sorting step
+        dictionary = list(dictionary)
 
         # list the word alphabetically for embedding
-        sorted_words = sorted(words, key=lambda x: words[x], reverse=True)
+        sorted_words = sorted(dictionary, reverse=True)
 
-        #optionally prepend UNK special word to list
+        # optionally prepend UNK special word to list
         if self.include_unk:
             sorted_words.insert(0, "UNK")
+            #we define a special index with an offset for unk
+            self.index = { x: i+1 for i,x in enumerate(sorted_words) }
 
-
+        else:
+            # define default index with no offset for unk
+            self.index = { x: i for i,x in enumerate(sorted_words) }
 
         #initialise the word embeddings with the new dictionary
+        self._init_embeddings(sorted_words)
 
-    def _init_embeddings(self, dictionary):
+    def _init_embeddings(self, sorted_words):
         """Once a dictionary of words is identified, initialise embeddings."""
 
         if self.custom_vectors_file:
@@ -55,7 +71,7 @@ class VocabularyManager:
 
             self.word_dimension = w2v.vector_size
 
-            self.embeddings = np.array([np.zeros(self.word_dimension)] +
+            self._embeddings = np.array([np.zeros(self.word_dimension)] +
                                        [np.array(w2v[x]) if x in w2v
                                        else np.random.rand(self.word_dimension)
                                        for x in sorted_words])
@@ -63,8 +79,8 @@ class VocabularyManager:
         else:
             self.logger.info("Using spacy vectors as base vocabulary")
 
-            self.word_dimension = self.en_nlp.vocab.vectors_length
+            self.word_dimension = self.nlp.vocab.vectors_length
 
-            self.embeddings = np.array([np.zeros(self.word_dimension)] +
-                                       [self.en_nlp.vocab[x].vector
+            self._embeddings = np.array([np.zeros(self.word_dimension)] +
+                                       [self.nlp.vocab[x].vector
                                         for x in sorted_words])
